@@ -1,0 +1,1 @@
+from .novelai_order import NovelAITagOrder

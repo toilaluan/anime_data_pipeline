@@ -46,3 +46,4 @@ if __name__ == "__main__":
     with Pool(16) as p:
         results = list(tqdm(p.imap(build_an_item, main_data), total=len(main_data)))
     json.dump(results, open('/home/ai/luantt/custom_scripts/data/ordered_tag_main_data.json', 'w'), indent=4)
+    sample
