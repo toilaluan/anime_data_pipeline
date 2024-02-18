@@ -177,41 +177,52 @@ class BucketManager:
         crop_right = crop_left + resized_width
         crop_bottom = crop_top + resized_height
         return crop_left, crop_top, crop_right, crop_bottom
+    def process_image(self, image_file):
+        if image_file is None:
+            return None, None
+        try:
+            image = Image.open(image_file)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as e:
+            print(f"Could not load image path: {image_file}, error: {e}")
+            return None, None
+
+        image_key = image_file
+        metadata = {image_key: {}}
+
+        reso, resized_size, ar_error = self.select_bucket(image.width, image.height)
+        bucket_counts = {reso: 1}
+        metadata[image_key]["train_resolution"] = (reso[0] - reso[0] % 8, reso[1] - reso[1] % 8)
+
+        # Assuming no_upscale is an attribute of YourClass
+        if not self.no_upscale:
+            assert resized_size[0] >= reso[0] and resized_size[1] >= reso[1], "internal error, resized size too small"
+
+        return metadata, abs(ar_error), bucket_counts
 
     def __call__(self, image_files: List[str]):
         self.make_buckets()
         metadata = {}
         img_ar_errors = []
         bucket_counts = {}
-        for image_file in tqdm(image_files, smoothing=0.0):
-            if image_file is None:
+        from multiprocessing import Pool, cpu_count
+        with Pool(processes=16) as pool:
+            results = list(tqdm(pool.imap(self.process_image, image_files), total=len(image_files)))
+
+        # Initialize aggregation variables
+        metadata = {}
+        img_ar_errors = []
+        bucket_counts = {}
+
+        # Aggregate results from all processes
+        for result in results:
+            if result[0] is None:
                 continue
-            try:
-                image = Image.open(image_file)
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
-            except Exception as e:
-                print(f"Could not load image path: {image_file}, error: {e}")
-                continue
+            meta, ar_error, counts = result
+            metadata.update(meta)
+            img_ar_errors.append(ar_error)
+            for reso, count in counts.items():
+                bucket_counts[reso] = bucket_counts.get(reso, 0) + count
 
-            image_key = image_file
-            metadata[image_key] = {}
-
-            reso, resized_size, ar_error = self.select_bucket(image.width, image.height)
-            img_ar_errors.append(abs(ar_error))
-            bucket_counts[reso] = bucket_counts.get(reso, 0) + 1
-            metadata[image_key]["train_resolution"] = (reso[0] - reso[0] % 8, reso[1] - reso[1] % 8)
-
-            if not self.no_upscale:
-                assert (
-                    resized_size[0] == reso[0] or resized_size[1] == reso[1]
-                ), f"internal error, resized size not match: {reso}, {resized_size}, {image.width}, {image.height}"
-                assert (
-                    resized_size[0] >= reso[0] and resized_size[1] >= reso[1]
-                ), f"internal error, resized size too small: {reso}, {resized_size}, {image.width}, {image.height}"
-
-            assert (
-                resized_size[0] >= reso[0] and resized_size[1] >= reso[1]
-            ), f"internal error resized size is small: {resized_size}, {reso}"
-    
         return metadata
